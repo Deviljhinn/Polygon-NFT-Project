@@ -1,385 +1,188 @@
-import { Contract, providers } from "ethers";
-import { formatEther } from "ethers/lib/utils";
-import Head from "next/head";
-import { useEffect, useRef, useState } from "react";
-import Web3Modal from "web3modal";
-import {
-  MONEYBUNNIES_DAO_ABI,
-  MONEYBUNNIES_DAO_CONTRACT_ADDRESS,
-  MONEYBUNNIES_NFT_ABI,
-  MONEYBUNNIES_NFT_CONTRACT_ADDRESS,
-} from "../constants";
-import styles from "../styles/Home.module.css";
+import { Contract, providers, utils } from "ethers";
+    import Head from "next/head";
+    import React, { useEffect, useRef, useState } from "react";
+    import Web3Modal from "web3modal";
+    import { abi, NFT_CONTRACT_ADDRESS } from "../constants";
+    import styles from "../styles/Home.module.css";
 
-export default function Home() {
-  // ETH Balance of the DAO contract
-  const [treasuryBalance, setTreasuryBalance] = useState("0");
-  // Number of proposals created in the DAO
-  const [numProposals, setNumProposals] = useState("0");
-  // Array of all proposals created in the DAO
-  const [proposals, setProposals] = useState([]);
-  // User's balance of MONEYBUNNIES NFTs
-  const [nftBalance, setNftBalance] = useState(0);
-  // Fake NFT Token ID to purchase. Used when creating a proposal.
-  const [fakeNftTokenId, setFakeNftTokenId] = useState("");
-  // One of "Create Proposal" or "View Proposals"
-  const [selectedTab, setSelectedTab] = useState("");
-  // True if waiting for a transaction to be mined, false otherwise.
-  const [loading, setLoading] = useState(false);
-  // True if user has connected their wallet, false otherwise
-  const [walletConnected, setWalletConnected] = useState(false);
-  const web3ModalRef = useRef();
+    export default function Home() {
+      // walletConnected keep track of whether the user's wallet is connected or not
+      const [walletConnected, setWalletConnected] = useState(false);
+      // loading is set to true when we are waiting for a transaction to get mined
+      const [loading, setLoading] = useState(false);
+      // tokenIdsMinted keeps track of the number of tokenIds that have been minted
+      const [tokenIdsMinted, setTokenIdsMinted] = useState("0");
+      // Create a reference to the Web3 Modal (used for connecting to Metamask) which persists as long as the page is open
+      const web3ModalRef = useRef();
 
-  // Helper function to connect wallet
-  const connectWallet = async () => {
-    try {
-      await getProviderOrSigner();
-      setWalletConnected(true);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  // Reads the ETH balance of the DAO contract and sets the `treasuryBalance` state variable
-  const getDAOTreasuryBalance = async () => {
-    try {
-      const provider = await getProviderOrSigner();
-      const balance = await provider.getBalance(
-        MONEYBUNNIES_DAO_CONTRACT_ADDRESS
-      );
-      setTreasuryBalance(balance.toString());
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  // Reads the number of proposals in the DAO contract and sets the `numProposals` state variable
-  const getNumProposalsInDAO = async () => {
-    try {
-      const provider = await getProviderOrSigner();
-      const contract = getDaoContractInstance(provider);
-      const daoNumProposals = await contract.numProposals();
-      setNumProposals(daoNumProposals.toString());
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  // Reads the balance of the user's MONEYBUNNIES NFTs and sets the `nftBalance` state variable
-  const getUserNFTBalance = async () => {
-    try {
-      const signer = await getProviderOrSigner(true);
-      const nftContract = getMoneybunniesNFTContractInstance(signer);
-      const balance = await nftContract.balanceOf(signer.getAddress());
-      setNftBalance(parseInt(balance.toString()));
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  // Calls the `createProposal` function in the contract, using the tokenId from `fakeNftTokenId`
-  const createProposal = async () => {
-    try {
-      const signer = await getProviderOrSigner(true);
-      const daoContract = getDaoContractInstance(signer);
-      const txn = await daoContract.createProposal(fakeNftTokenId);
-      setLoading(true);
-      await txn.wait();
-      await getNumProposalsInDAO();
-      setLoading(false);
-    } catch (error) {
-      console.error(error);
-      window.alert(error.data.message);
-    }
-  };
-
-  // Helper function to fetch and parse one proposal from the DAO contract
-  // Given the Proposal ID
-  // and converts the returned data into a Javascript object with values we can use
-  const fetchProposalById = async (id) => {
-    try {
-      const provider = await getProviderOrSigner();
-      const daoContract = getDaoContractInstance(provider);
-      const proposal = await daoContract.proposals(id);
-      const parsedProposal = {
-        proposalId: id,
-        nftTokenId: proposal.nftTokenId.toString(),
-        deadline: new Date(parseInt(proposal.deadline.toString()) * 1000),
-        yayVotes: proposal.yayVotes.toString(),
-        nayVotes: proposal.nayVotes.toString(),
-        executed: proposal.executed,
+      /**
+       * publicMint: Mint an NFT
+       */
+      const publicMint = async () => {
+        try {
+          console.log("Public mint");
+          // We need a Signer here since this is a 'write' transaction.
+          const signer = await getProviderOrSigner(true);
+          // Create a new instance of the Contract with a Signer, which allows
+          // update methods
+          const nftContract = new Contract(NFT_CONTRACT_ADDRESS, abi, signer);
+          // call the mint from the contract to mint the MoonBunnies
+          const tx = await nftContract.mint({
+            // value signifies the cost of one MoonBunnies which is "0.01" eth.
+            // We are parsing `0.01` string to ether using the utils library from ethers.js
+            value: utils.parseEther("0.01"),
+          });
+          setLoading(true);
+          // wait for the transaction to get mined
+          await tx.wait();
+          setLoading(false);
+          window.alert("You successfully minted a MoonBunny!");
+        } catch (err) {
+          console.error(err);
+        }
       };
-      return parsedProposal;
-    } catch (error) {
-      console.error(error);
-    }
-  };
 
-  // Runs a loop `numProposals` times to fetch all proposals in the DAO
-  // and sets the `proposals` state variable
-  const fetchAllProposals = async () => {
-    try {
-      const proposals = [];
-      for (let i = 0; i < numProposals; i++) {
-        const proposal = await fetchProposalById(i);
-        proposals.push(proposal);
-      }
-      setProposals(proposals);
-      return proposals;
-    } catch (error) {
-      console.error(error);
-    }
-  };
+      /*
+        connectWallet: Connects the MetaMask wallet
+      */
+      const connectWallet = async () => {
+        try {
+          // Get the provider from web3Modal, which in our case is MetaMask
+          // When used for the first time, it prompts the user to connect their wallet
+          await getProviderOrSigner();
+          setWalletConnected(true);
+        } catch (err) {
+          console.error(err);
+        }
+      };
 
-  // Calls the `voteOnProposal` function in the contract, using the passed
-  // proposal ID and Vote
-  const voteOnProposal = async (proposalId, _vote) => {
-    try {
-      const signer = await getProviderOrSigner(true);
-      const daoContract = getDaoContractInstance(signer);
+      /**
+       * getTokenIdsMinted: gets the number of tokenIds that have been minted
+       */
+      const getTokenIdsMinted = async () => {
+        try {
+          // Get the provider from web3Modal, which in our case is MetaMask
+          // No need for the Signer here, as we are only reading state from the blockchain
+          const provider = await getProviderOrSigner();
+          // We connect to the Contract using a Provider, so we will only
+          // have read-only access to the Contract
+          const nftContract = new Contract(NFT_CONTRACT_ADDRESS, abi, provider);
+          // call the tokenIds from the contract
+          const _tokenIds = await nftContract.tokenIds();
+          console.log("tokenIds", _tokenIds);
+          //_tokenIds is a `Big Number`. We need to convert the Big Number to a string
+          setTokenIdsMinted(_tokenIds.toString());
+        } catch (err) {
+          console.error(err);
+        }
+      };
 
-      let vote = _vote === "YAY" ? 0 : 1;
-      const txn = await daoContract.voteOnProposal(proposalId, vote);
-      setLoading(true);
-      await txn.wait();
-      setLoading(false);
-      await fetchAllProposals();
-    } catch (error) {
-      console.error(error);
-      window.alert(error.data.message);
-    }
-  };
+      /**
+       * Returns a Provider or Signer object representing the Ethereum RPC with or without the
+       * signing capabilities of metamask attached
+       *
+       * A `Provider` is needed to interact with the blockchain - reading transactions, reading balances, reading state, etc.
+       *
+       * A `Signer` is a special type of Provider used in case a `write` transaction needs to be made to the blockchain, which involves the connected account
+       * needing to make a digital signature to authorize the transaction being sent. Metamask exposes a Signer API to allow your website to
+       * request signatures from the user using Signer functions.
+       *
+       * @param {*} needSigner - True if you need the signer, default false otherwise
+       */
+      const getProviderOrSigner = async (needSigner = false) => {
+        // Connect to Metamask
+        // Since we store `web3Modal` as a reference, we need to access the `current` value to get access to the underlying object
+        const provider = await web3ModalRef.current.connect();
+        const web3Provider = new providers.Web3Provider(provider);
 
-  // Calls the `executeProposal` function in the contract, using
-  // the passed proposal ID
-  const executeProposal = async (proposalId) => {
-    try {
-      const signer = await getProviderOrSigner(true);
-      const daoContract = getDaoContractInstance(signer);
-      const txn = await daoContract.executeProposal(proposalId);
-      setLoading(true);
-      await txn.wait();
-      setLoading(false);
-      await fetchAllProposals();
-    } catch (error) {
-      console.error(error);
-      window.alert(error.data.message);
-    }
-  };
+        // If user is not connected to the Mumbai network, let them know and throw an error
+        const { chainId } = await web3Provider.getNetwork();
+        if (chainId !== 80001) {
+          window.alert("Change the network to Mumbai");
+          throw new Error("Change network to Mumbai");
+        }
 
-  // Helper function to fetch a Provider/Signer instance from Metamask
-  const getProviderOrSigner = async (needSigner = false) => {
-    const provider = await web3ModalRef.current.connect();
-    const web3Provider = new providers.Web3Provider(provider);
+        if (needSigner) {
+          const signer = web3Provider.getSigner();
+          return signer;
+        }
+        return web3Provider;
+      };
 
-    const { chainId } = await web3Provider.getNetwork();
-    if (chainId !== 0x13881) {
-      window.alert("Please switch to the Mumbai network!");
-      throw new Error("Please switch to the Mumbai network");
-    }
+      // useEffects are used to react to changes in state of the website
+      // The array at the end of function call represents what state changes will trigger this effect
+      // In this case, whenever the value of `walletConnected` changes - this effect will be called
+      useEffect(() => {
+        // if wallet is not connected, create a new instance of Web3Modal and connect the MetaMask wallet
+        if (!walletConnected) {
+          // Assign the Web3Modal class to the reference object by setting it's `current` value
+          // The `current` value is persisted throughout as long as this page is open
+          web3ModalRef.current = new Web3Modal({
+            network: "mumbai",
+            providerOptions: {},
+            disableInjectedProvider: false,
+          });
 
-    if (needSigner) {
-      const signer = web3Provider.getSigner();
-      return signer;
-    }
-    return web3Provider;
-  };
+          connectWallet();
 
-  // Helper function to return a DAO Contract instance
-  // given a Provider/Signer
-  const getDaoContractInstance = (providerOrSigner) => {
-    return new Contract(
-      MONEYBUNNIES_DAO_CONTRACT_ADDRESS,
-      MONEYBUNNIES_DAO_ABI,
-      providerOrSigner
-    );
-  };
+          getTokenIdsMinted();
 
-  // Helper function to return a MONEYBUNNIES NFT Contract instance
-  // given a Provider/Signer
-  const getMoneybunniesNFTContractInstance = (providerOrSigner) => {
-    return new Contract(
-      MONEYBUNNIES_NFT_CONTRACT_ADDRESS,
-      MONEYBUNNIES_NFT_ABI,
-      providerOrSigner
-    );
-  };
+          // set an interval to get the number of token Ids minted every 5 seconds
+          setInterval(async function () {
+            await getTokenIdsMinted();
+          }, 5 * 1000);
+        }
+      }, [walletConnected]);
 
-  // piece of code that runs everytime the value of `walletConnected` changes
-  // so when a wallet connects or disconnects
-  // Prompts user to connect wallet if not connected
-  // and then calls helper functions to fetch the
-  // DAO Treasury Balance, User NFT Balance, and Number of Proposals in the DAO
-  useEffect(() => {
-    if (!walletConnected) {
-      web3ModalRef.current = new Web3Modal({
-        network: "mumbai",
-        providerOptions: {},
-        disableInjectedProvider: false,
-      });
+      /*
+        renderButton: Returns a button based on the state of the dapp
+      */
+      const renderButton = () => {
+        // If wallet is not connected, return a button which allows them to connect their wallet
+        if (!walletConnected) {
+          return (
+            <button onClick={connectWallet} className={styles.button}>
+              Connect your wallet
+            </button>
+          );
+        }
 
-      connectWallet().then(() => {
-        getDAOTreasuryBalance();
-        getUserNFTBalance();
-        getNumProposalsInDAO();
-      });
-    }
-  }, [walletConnected]);
+        // If we are currently waiting for something, return a loading button
+        if (loading) {
+          return <button className={styles.button}>Loading...</button>;
+        }
 
-  // Piece of code that runs everytime the value of `selectedTab` changes
-  // Used to re-fetch all proposals in the DAO when user switches
-  // to the 'View Proposals' tab
-  useEffect(() => {
-    if (selectedTab === "View Proposals") {
-      fetchAllProposals();
-    }
-  }, [selectedTab]);
-
-  // Render the contents of the appropriate tab based on `selectedTab`
-  function renderTabs() {
-    if (selectedTab === "Create Proposal") {
-      return renderCreateProposalTab();
-    } else if (selectedTab === "View Proposals") {
-      return renderViewProposalsTab();
-    }
-    return null;
-  }
-
-  // Renders the 'Create Proposal' tab content
-  function renderCreateProposalTab() {
-    if (loading) {
-      return (
-        <div className={styles.description}>
-          Loading... Waiting for transaction...
-        </div>
-      );
-    } else if (nftBalance === 0) {
-      return (
-        <div className={styles.description}>
-          You do not own any MoneyBunnies. <br />
-          <b>You cannot create or vote on proposals.</b>
-        </div>
-      );
-    } else {
-      return (
-        <div className={styles.container}>
-          <label>NFT Token ID to Purchase: </label>
-          <input
-            placeholder="0"
-            type="number"
-            onChange={(e) => setFakeNftTokenId(e.target.value)}
-          />
-          <button className={styles.button2} onClick={createProposal}>
-            Create
+        return (
+          <button className={styles.button} onClick={publicMint}>
+            Public Mint 🚀
           </button>
-        </div>
-      );
-    }
-  }
+        );
+      };
 
-  // Renders the 'View Proposals' tab content
-  function renderViewProposalsTab() {
-    if (loading) {
-      return (
-        <div className={styles.description}>
-          Loading... Waiting for transaction...
-        </div>
-      );
-    } else if (proposals.length === 0) {
-      return (
-        <div className={styles.description}>
-          No proposals have been created
-        </div>
-      );
-    } else {
       return (
         <div>
-          {proposals.map((p, index) => (
-            <div key={index} className={styles.proposalCard}>
-              <p>Proposal ID: {p.proposalId}</p>
-              <p>NFT to Purchase: {p.nftTokenId}</p>
-              <p>Deadline: {p.deadline.toLocaleString()}</p>
-              <p>Yay Votes: {p.yayVotes}</p>
-              <p>Nay Votes: {p.nayVotes}</p>
-              <p>Executed?: {p.executed.toString()}</p>
-              {p.deadline.getTime() > Date.now() && !p.executed ? (
-                <div className={styles.flex}>
-                  <button
-                    className={styles.button2}
-                    onClick={() => voteOnProposal(p.proposalId, "YAY")}
-                  >
-                    Vote YAY
-                  </button>
-                  <button
-                    className={styles.button2}
-                    onClick={() => voteOnProposal(p.proposalId, "NAY")}
-                  >
-                    Vote NAY
-                  </button>
-                </div>
-              ) : p.deadline.getTime() < Date.now() && !p.executed ? (
-                <div className={styles.flex}>
-                  <button
-                    className={styles.button2}
-                    onClick={() => executeProposal(p.proposalId)}
-                  >
-                    Execute Proposal{" "}
-                    {p.yayVotes > p.nayVotes ? "(YAY)" : "(NAY)"}
-                  </button>
-                </div>
-              ) : (
-                <div className={styles.description}>Proposal Executed</div>
-              )}
+          <Head>
+            <title>Money Bunnies</title>
+            <meta name="description" content="MoneyBunnies-Dapp" />
+            <link rel="icon" href="/favicon.ico" />
+          </Head>
+          <div className={styles.main}>
+            <div>
+              <h1 className={styles.title}>Welcome to MoneyBunnies!</h1>
+              <div className={styles.description}>
+                Its an NFT collection for MoneyBunnies.
+              </div>
+              <div className={styles.description}>
+                {tokenIdsMinted}/100 have been minted
+              </div>
+              {renderButton()}
             </div>
-          ))}
+            <div>
+              <img className={styles.image} src="./bunny.gif" />
+            </div>
+          </div>
+
+          <footer className={styles.footer}>Made &#128048; by Hurrachi</footer>
         </div>
       );
     }
-  }
-
-  return (
-    <div>
-      <Head>
-        <title>MONEYBUNNIES DAO</title>
-        <meta name="description" content="MONEYBUNNIES DAO" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-
-      <div className={styles.main}>
-        <div>
-          <h1 className={styles.title}>Welcome to the MONEY BUNNIES DAO!</h1>
-          <div className={styles.description}>A public treasure chest where bunny owners vote on NFTs to buy!<br></br> Create a request or vote on existing proposals.</div>
-          <div className={styles.description}>
-            Your MNBNY NFT Balance: {nftBalance}
-            <br />
-            Treasury Balance: {formatEther(treasuryBalance)} ETH
-            <br />
-            Total Number of Proposals: {numProposals}
-          </div>
-          <div className={styles.flex}>
-            <button
-              className={styles.button}
-              onClick={() => setSelectedTab("Create Proposal")}
-            >
-              Create Proposal
-            </button>
-            <button
-              className={styles.button}
-              onClick={() => setSelectedTab("View Proposals")}
-            >
-              View Proposals
-            </button>
-          </div>
-          {renderTabs()}
-        </div>
-        <div>
-          <img className={styles.image} src="/moneybunnies/0.png" />
-        </div>
-      </div>
-
-      <footer className={styles.footer}>
-        Made &#128048; by Hurrachi
-      </footer>
-    </div>
-  );
-}
