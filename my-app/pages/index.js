@@ -182,7 +182,7 @@ import { Contract, providers, utils } from "ethers";
             </div>
           </div>
 
-          <footer className={styles.footer}>Made with &#10084; by Jhinn</footer>
+          <footer className={styles.footer}>Made &#128048; by Hurrachi</footer>
         </div>
       );
     }
